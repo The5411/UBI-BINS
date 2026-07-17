@@ -1,0 +1,12 @@
+{
+  "name": "ubi-bins",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Conversor de ubicaciones a bins servido como una app web en Railway",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
