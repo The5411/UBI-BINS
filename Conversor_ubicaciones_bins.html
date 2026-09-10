@@ -97,6 +97,13 @@
     color:var(--sub);
     text-align:center;
   }
+  .src-info{
+    margin:-6px 0 16px;
+    font-size:12px;
+    color:var(--sub);
+    line-height:1.5;
+  }
+  .src-info.err{color:var(--warn);}
   .warn-box{
     margin-top:14px;
     background:var(--warn-bg);
@@ -174,6 +181,13 @@
       <div class="rack-btn selected" data-bins="18">18 bins</div>
     </div>
 
+    <div class="rack-options" id="typeOptions">
+      <div class="rack-btn selected" data-type="BINS">Tipo BINS</div>
+      <div class="rack-btn" data-type="PICK">Tipo PICK</div>
+    </div>
+
+    <div class="src-info" id="locSourceInfo">Cargando locations.csv…</div>
+
     <textarea id="locInput" placeholder="2-L-11-2&#10;3-A-4-1&#10;1-C-9-0"></textarea>
 
     <button class="primary" id="genBtn">Generar y descargar CSV</button>
@@ -226,6 +240,86 @@ const LOOKUP = {"ws": {"RS": 9999, "CART-ECOM": 9999, "A-1-0": 9999, "A-2-0": 99
 
 let selectedWh = 'ws';
 let selectedBinCount = 18;
+let selectedLocType = 'BINS';
+
+// Tabla de PickSequence leida desde locations.csv (tiene prioridad sobre LOOKUP).
+const CSV_LOOKUP = {ws:{}, ecomm:{}};
+const WAREHOUSE_KEY = {'General / Wholesale':'ws', 'Ecommerce':'ecomm'};
+
+function parseCsv(text){
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  for(let i=0; i<text.length; i++){
+    const c = text[i];
+    if(quoted){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i++; }
+        else quoted = false;
+      } else field += c;
+    } else if(c === '"'){ quoted = true; }
+    else if(c === ','){ row.push(field); field = ''; }
+    else if(c === '\n'){ row.push(field); rows.push(row); row = []; field = ''; }
+    else if(c !== '\r'){ field += c; }
+  }
+  if(field.length > 0 || row.length > 0){ row.push(field); rows.push(row); }
+  return rows;
+}
+
+const locationsReady = fetch('locations.csv', {cache:'no-store'})
+  .then(r => { if(!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+  .then(text => {
+    const rows = parseCsv(text);
+    if(rows.length < 2) throw new Error('archivo vacio');
+    const head = rows[0].map(h => h.trim());
+    const iWh = head.indexOf('Warehouse');
+    const iName = head.indexOf('LocationName');
+    const iSimple = head.indexOf('SimpleLocationName');
+    const iSeq = head.indexOf('PickSequence');
+    if(iName === -1 || iSeq === -1) throw new Error('faltan columnas');
+    let count = 0;
+    for(let i=1; i<rows.length; i++){
+      const r = rows[i];
+      if(!r || r.length <= iSeq) continue;
+      const whKey = WAREHOUSE_KEY[(r[iWh] || '').trim()] || 'ws';
+      const seq = (r[iSeq] || '').trim();
+      if(seq === '') continue;
+      const names = [r[iName], iSimple === -1 ? '' : r[iSimple]];
+      names.forEach(n => {
+        const name = (n || '').trim();
+        if(name === '') return;
+        if(!Object.prototype.hasOwnProperty.call(CSV_LOOKUP[whKey], name)) count++;
+        CSV_LOOKUP[whKey][name] = seq;
+      });
+    }
+    const info = document.getElementById('locSourceInfo');
+    if(info) info.textContent = 'PickSequence desde locations.csv · ' + count + ' ubicaciones';
+    return true;
+  })
+  .catch(err => {
+    const info = document.getElementById('locSourceInfo');
+    if(info){
+      info.classList.add('err');
+      info.textContent = 'No se pudo leer locations.csv (' + err.message + '). Se usa la tabla interna.';
+    }
+    return false;
+  });
+
+// Busca el PickSequence del padre: para 2-A-1-0-1 busca 2-A-1-0.
+function lookupPickSequence(wh, loc){
+  const tables = [CSV_LOOKUP[wh] || {}, LOOKUP[wh] || {}];
+  const candidates = [loc];
+  const parts = loc.split('-');
+  if(parts.length > 3) candidates.push(parts.slice(0, -1).join('-'));
+  for(const cand of candidates){
+    for(const table of tables){
+      if(Object.prototype.hasOwnProperty.call(table, cand)){
+        const v = table[cand];
+        if(v !== null && v !== '' && v !== undefined) return v;
+      }
+    }
+  }
+  return null;
+}
 
 document.getElementById('whOptions').addEventListener('click', (e) => {
   const btn = e.target.closest('.wh-btn');
@@ -238,9 +332,17 @@ document.getElementById('whOptions').addEventListener('click', (e) => {
 document.getElementById('rackOptions').addEventListener('click', (e) => {
   const btn = e.target.closest('.rack-btn');
   if(!btn) return;
-  document.querySelectorAll('.rack-btn').forEach(b=>b.classList.remove('selected'));
+  document.querySelectorAll('#rackOptions .rack-btn').forEach(b=>b.classList.remove('selected'));
   btn.classList.add('selected');
   selectedBinCount = Number(btn.dataset.bins || 18);
+});
+
+document.getElementById('typeOptions').addEventListener('click', (e) => {
+  const btn = e.target.closest('.rack-btn');
+  if(!btn) return;
+  document.querySelectorAll('#typeOptions .rack-btn').forEach(b=>b.classList.remove('selected'));
+  btn.classList.add('selected');
+  selectedLocType = btn.dataset.type || 'BINS';
 });
 
 function parseLocation(raw){
@@ -253,12 +355,13 @@ function parseLocation(raw){
   return null;
 }
 
-document.getElementById('genBtn').addEventListener('click', () => {
+document.getElementById('genBtn').addEventListener('click', async () => {
+  await locationsReady;
   const raw = document.getElementById('locInput').value;
   const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
   const warehouseLabel = selectedWh === 'ws' ? 'General / Wholesale' : 'Ecommerce';
   const binCount = selectedBinCount;
-  const table = LOOKUP[selectedWh];
+  const locType = selectedLocType;
 
   const rows = [];
   const notFound = [];
@@ -272,13 +375,13 @@ document.getElementById('genBtn').addEventListener('click', () => {
       invalid.push(loc);
       return;
     }
-    const pickSeq = Object.prototype.hasOwnProperty.call(table, cleanLoc) ? table[cleanLoc] : null;
+    const pickSeq = lookupPickSequence(selectedWh, cleanLoc);
     if(pickSeq === null) notFound.push(loc);
     for(let n=1; n<=binCount; n++){
       const name = loc + '-' + n;
       rows.push([
         '', warehouseLabel, parsed.zone, parsed.aisle, parsed.bay, parsed.shelf,
-        name, name, 'PICK', false, pickSeq === null ? '' : pickSeq
+        name, name, locType, false, pickSeq === null ? '' : pickSeq
       ]);
     }
   });
@@ -292,7 +395,7 @@ document.getElementById('genBtn').addEventListener('click', () => {
     return;
   }
 
-  statusEl.textContent = lines.length + ' ubicaciones · ' + rows.length + ' filas generadas';
+  statusEl.textContent = lines.length + ' ubicaciones · ' + rows.length + ' filas generadas · tipo ' + locType;
   const pdfSection = document.getElementById('pdfSection');
   if (pdfSection) {
     pdfSection.classList.add('show');

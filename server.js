@@ -12,6 +12,7 @@ const mimeTypes = {
   '.css': 'text/css; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.csv': 'text/csv; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -20,10 +21,25 @@ const mimeTypes = {
   '.ico': 'image/x-icon'
 };
 
+// locations.csv es la fuente de PickSequence: se busca primero junto al server
+// y, si no esta, en el directorio padre del repo.
+function resolveLocationsCsv() {
+  const candidates = [
+    path.join(rootDir, 'locations.csv'),
+    path.join(path.dirname(rootDir), 'locations.csv')
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || candidates[0];
+}
+
 function resolvePath(requestPath) {
   const decodedPath = decodeURIComponent(requestPath);
   const normalizedPath = decodedPath.replace(/^\/+/, '');
   const requestedFile = normalizedPath || 'Conversor_ubicaciones_bins.html';
+
+  if (requestedFile.toLowerCase() === 'locations.csv') {
+    return resolveLocationsCsv();
+  }
+
   const fullPath = path.resolve(rootDir, requestedFile);
 
   if (!fullPath.startsWith(rootDir)) {
