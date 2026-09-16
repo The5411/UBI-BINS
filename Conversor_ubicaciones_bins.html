@@ -246,11 +246,14 @@ let selectedLocType = 'BINS';
 
 // Warehouses disponibles. El label es lo que se escribe en la columna Warehouse
 // del CSV generado y lo que se busca en la columna Warehouse de locations.csv.
+// seqFrom: de que warehouse se toma el PickSequence si no hay dato propio.
 const WAREHOUSES = [
   {key:'ws',     label:'General / Wholesale'},
   {key:'ecomm',  label:'Ecommerce'},
-  {key:'majors', label:'Majors'}
+  {key:'majors', label:'Majors', seqFrom:'ecomm'}
 ];
+const SEQ_FROM = {};
+WAREHOUSES.forEach(w => { if(w.seqFrom) SEQ_FROM[w.key] = w.seqFrom; });
 
 // Tabla de PickSequence leida desde locations.csv (tiene prioridad sobre LOOKUP).
 const CSV_LOOKUP = {};
@@ -311,11 +314,14 @@ const locationsReady = fetch('locations.csv', {cache:'no-store'})
     const info = document.getElementById('locSourceInfo');
     if(info){
       const withData = WAREHOUSES.filter(w => counts[w.key] > 0);
-      const without = WAREHOUSES.filter(w => counts[w.key] === 0);
+      const inherited = WAREHOUSES.filter(w => counts[w.key] === 0 && w.seqFrom);
+      const without = WAREHOUSES.filter(w => counts[w.key] === 0 && !w.seqFrom);
+      const labelOf = k => (WAREHOUSES.find(w => w.key === k) || {label:k}).label;
       let msg = 'PickSequence desde locations.csv · ' +
         withData.map(w => w.label + ': ' + counts[w.key]).join(' · ');
       if(withData.length === 0) msg = 'locations.csv leido pero sin PickSequence utilizable';
-      if(without.length > 0) msg += ' · sin datos: ' + without.map(w => w.label).join(', ');
+      inherited.forEach(w => { msg += ' · ' + w.label + ': usa ' + labelOf(w.seqFrom); });
+      if(without.length > 0) msg += ' · sin datos en el CSV (usa tabla interna): ' + without.map(w => w.label).join(', ');
       info.textContent = msg;
     }
     return true;
@@ -331,7 +337,12 @@ const locationsReady = fetch('locations.csv', {cache:'no-store'})
 
 // Busca el PickSequence del padre: para 2-A-1-0-1 busca 2-A-1-0.
 function lookupPickSequence(wh, loc){
-  const tables = [CSV_LOOKUP[wh] || {}, LOOKUP[wh] || {}];
+  // Primero el dato propio del warehouse; despues el heredado (Majors usa Ecommerce).
+  const keys = [wh];
+  let from = SEQ_FROM[wh];
+  while(from && keys.indexOf(from) === -1){ keys.push(from); from = SEQ_FROM[from]; }
+  const tables = [];
+  keys.forEach(k => { tables.push(CSV_LOOKUP[k] || {}, LOOKUP[k] || {}); });
   const candidates = [loc];
   const parts = loc.split('-');
   if(parts.length > 3) candidates.push(parts.slice(0, -1).join('-'));
