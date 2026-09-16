@@ -173,6 +173,8 @@
     <div class="wh-options" id="whOptions">
       <div class="wh-btn selected" data-wh="ws">General / Wholesale</div>
       <div class="wh-btn" data-wh="ecomm">Ecommerce</div>
+      <div class="wh-btn" data-wh="majors">Majors</div>
+      <div class="wh-btn" data-wh="all">Los 3</div>
     </div>
 
     <div class="rack-options" id="rackOptions">
@@ -242,9 +244,23 @@ let selectedWh = 'ws';
 let selectedBinCount = 18;
 let selectedLocType = 'BINS';
 
+// Warehouses disponibles. El label es lo que se escribe en la columna Warehouse
+// del CSV generado y lo que se busca en la columna Warehouse de locations.csv.
+const WAREHOUSES = [
+  {key:'ws',     label:'General / Wholesale'},
+  {key:'ecomm',  label:'Ecommerce'},
+  {key:'majors', label:'Majors'}
+];
+
 // Tabla de PickSequence leida desde locations.csv (tiene prioridad sobre LOOKUP).
-const CSV_LOOKUP = {ws:{}, ecomm:{}};
-const WAREHOUSE_KEY = {'General / Wholesale':'ws', 'Ecommerce':'ecomm'};
+const CSV_LOOKUP = {};
+const WAREHOUSE_KEY = {};
+WAREHOUSES.forEach(w => { CSV_LOOKUP[w.key] = {}; WAREHOUSE_KEY[w.label] = w.key; });
+
+// 'all' = generar las mismas filas para los 3 warehouses.
+function targetWarehouses(sel){
+  return sel === 'all' ? WAREHOUSES : WAREHOUSES.filter(w => w.key === sel);
+}
 
 function parseCsv(text){
   const rows = [];
@@ -276,7 +292,8 @@ const locationsReady = fetch('locations.csv', {cache:'no-store'})
     const iSimple = head.indexOf('SimpleLocationName');
     const iSeq = head.indexOf('PickSequence');
     if(iName === -1 || iSeq === -1) throw new Error('faltan columnas');
-    let count = 0;
+    const counts = {};
+    WAREHOUSES.forEach(w => { counts[w.key] = 0; });
     for(let i=1; i<rows.length; i++){
       const r = rows[i];
       if(!r || r.length <= iSeq) continue;
@@ -287,12 +304,20 @@ const locationsReady = fetch('locations.csv', {cache:'no-store'})
       names.forEach(n => {
         const name = (n || '').trim();
         if(name === '') return;
-        if(!Object.prototype.hasOwnProperty.call(CSV_LOOKUP[whKey], name)) count++;
+        if(!Object.prototype.hasOwnProperty.call(CSV_LOOKUP[whKey], name)) counts[whKey]++;
         CSV_LOOKUP[whKey][name] = seq;
       });
     }
     const info = document.getElementById('locSourceInfo');
-    if(info) info.textContent = 'PickSequence desde locations.csv · ' + count + ' ubicaciones';
+    if(info){
+      const withData = WAREHOUSES.filter(w => counts[w.key] > 0);
+      const without = WAREHOUSES.filter(w => counts[w.key] === 0);
+      let msg = 'PickSequence desde locations.csv · ' +
+        withData.map(w => w.label + ': ' + counts[w.key]).join(' · ');
+      if(withData.length === 0) msg = 'locations.csv leido pero sin PickSequence utilizable';
+      if(without.length > 0) msg += ' · sin datos: ' + without.map(w => w.label).join(', ');
+      info.textContent = msg;
+    }
     return true;
   })
   .catch(err => {
@@ -359,31 +384,40 @@ document.getElementById('genBtn').addEventListener('click', async () => {
   await locationsReady;
   const raw = document.getElementById('locInput').value;
   const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
-  const warehouseLabel = selectedWh === 'ws' ? 'General / Wholesale' : 'Ecommerce';
+  const warehouses = targetWarehouses(selectedWh);
   const binCount = selectedBinCount;
   const locType = selectedLocType;
 
   const rows = [];
-  const notFound = [];
+  const notFoundByWh = [];
   const invalid = [];
 
+  // Primero validamos el formato una sola vez, aunque se generen varios warehouses.
+  const parsedLines = [];
   lines.forEach(loc => {
-    const hasStar = loc.startsWith('*');
-    const cleanLoc = hasStar ? loc.slice(1) : loc;
+    const cleanLoc = loc.startsWith('*') ? loc.slice(1) : loc;
     const parsed = parseLocation(cleanLoc);
     if(!parsed){
       invalid.push(loc);
       return;
     }
-    const pickSeq = lookupPickSequence(selectedWh, cleanLoc);
-    if(pickSeq === null) notFound.push(loc);
-    for(let n=1; n<=binCount; n++){
-      const name = loc + '-' + n;
-      rows.push([
-        '', warehouseLabel, parsed.zone, parsed.aisle, parsed.bay, parsed.shelf,
-        name, name, locType, false, pickSeq === null ? '' : pickSeq
-      ]);
-    }
+    parsedLines.push({loc, cleanLoc, parsed});
+  });
+
+  warehouses.forEach(wh => {
+    const notFound = [];
+    parsedLines.forEach(({loc, cleanLoc, parsed}) => {
+      const pickSeq = lookupPickSequence(wh.key, cleanLoc);
+      if(pickSeq === null) notFound.push(loc);
+      for(let n=1; n<=binCount; n++){
+        const name = loc + '-' + n;
+        rows.push([
+          '', wh.label, parsed.zone, parsed.aisle, parsed.bay, parsed.shelf,
+          name, name, locType, false, pickSeq === null ? '' : pickSeq
+        ]);
+      }
+    });
+    if(notFound.length > 0) notFoundByWh.push({label: wh.label, locs: notFound, all: notFound.length === parsedLines.length});
   });
 
   const statusEl = document.getElementById('status');
@@ -395,16 +429,24 @@ document.getElementById('genBtn').addEventListener('click', async () => {
     return;
   }
 
-  statusEl.textContent = lines.length + ' ubicaciones · ' + rows.length + ' filas generadas · tipo ' + locType;
+  const whSummary = warehouses.length > 1
+    ? warehouses.length + ' warehouses'
+    : warehouses[0].label;
+  statusEl.textContent = parsedLines.length + ' ubicaciones · ' + rows.length + ' filas generadas · tipo ' + locType + ' · ' + whSummary;
   const pdfSection = document.getElementById('pdfSection');
   if (pdfSection) {
     pdfSection.classList.add('show');
     pdfSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  if(notFound.length > 0 || invalid.length > 0){
+  if(notFoundByWh.length > 0 || invalid.length > 0){
     let html = '<div class="warn-box">';
-    if(notFound.length > 0) html += 'Sin PickSequence: ' + notFound.join(', ') + '<br>';
+    notFoundByWh.forEach(nf => {
+      const prefix = warehouses.length > 1 ? nf.label + ': ' : '';
+      html += nf.all
+        ? prefix + 'ninguna ubicacion tiene PickSequence (no hay datos de este warehouse en locations.csv)<br>'
+        : prefix + 'sin PickSequence: ' + nf.locs.join(', ') + '<br>';
+    });
     if(invalid.length > 0) html += 'Formato no reconocido: ' + invalid.join(', ');
     html += '</div>';
     warnHolder.innerHTML = html;
@@ -419,15 +461,16 @@ document.getElementById('genBtn').addEventListener('click', async () => {
     return s;
   };
   const csv = data.map(row => row.map(csvEscape).join(',')).join('\r\n');
+  const fileName = 'Locations_' + lines[0] + (warehouses.length > 1 ? '_3WH' : '') + '.csv';
   window.lastGeneratedCsv = {
     text: csv,
-    fileName: 'Locations_' + lines[0] + '.csv'
+    fileName: fileName
   };
   const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'Locations_' + lines[0] + '.csv';
+  a.download = fileName;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
