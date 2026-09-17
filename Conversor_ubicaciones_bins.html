@@ -104,6 +104,20 @@
     line-height:1.5;
   }
   .src-info.err{color:var(--warn);}
+  .type-note{
+    margin:-8px 0 18px;
+    padding:9px 11px;
+    border:1px solid var(--line);
+    border-left:3px solid var(--accent);
+    border-radius:6px;
+    background:#FBFAF6;
+    font-size:12.5px;
+    line-height:1.55;
+    color:var(--sub);
+  }
+  .type-note strong{color:var(--accent-dark); font-weight:600;}
+  .type-note.alt{border-left-color:var(--warn);}
+  .type-note.alt strong{color:var(--warn);}
   .warn-box{
     margin-top:14px;
     background:var(--warn-bg);
@@ -184,9 +198,11 @@
     </div>
 
     <div class="rack-options" id="typeOptions">
-      <div class="rack-btn selected" data-type="BINS">Tipo BINS</div>
-      <div class="rack-btn" data-type="PICK">Tipo PICK</div>
+      <div class="rack-btn selected" data-type="PICK">Tipo PICK</div>
+      <div class="rack-btn" data-type="BINS">Tipo BINS</div>
     </div>
+
+    <div class="type-note" id="typeNote">Los bins se crean con <strong>LocationType PICK</strong>. Elegi BINS solo si esas ubicaciones tienen que cargarse con ese tipo.</div>
 
     <div class="src-info" id="locSourceInfo">Cargando locations.csv…</div>
 
@@ -242,7 +258,7 @@ const LOOKUP = {"ws": {"RS": 9999, "CART-ECOM": 9999, "A-1-0": 9999, "A-2-0": 99
 
 let selectedWh = 'ws';
 let selectedBinCount = 18;
-let selectedLocType = 'BINS';
+let selectedLocType = 'PICK';
 
 // Warehouses disponibles. El label es lo que se escribe en la columna Warehouse
 // del CSV generado y lo que se busca en la columna Warehouse de locations.csv.
@@ -374,12 +390,27 @@ document.getElementById('rackOptions').addEventListener('click', (e) => {
   selectedBinCount = Number(btn.dataset.bins || 18);
 });
 
+// La nota deja explicito con que LocationType van a salir los bins.
+function updateTypeNote(){
+  const note = document.getElementById('typeNote');
+  if(!note) return;
+  if(selectedLocType === 'PICK'){
+    note.classList.remove('alt');
+    note.innerHTML = 'Los bins se crean con <strong>LocationType PICK</strong>. Elegi BINS solo si esas ubicaciones tienen que cargarse con ese tipo.';
+  } else {
+    note.classList.add('alt');
+    note.innerHTML = 'Los bins se van a crear con <strong>LocationType BINS</strong>, no con el PICK que se usa por defecto.';
+  }
+}
+updateTypeNote();
+
 document.getElementById('typeOptions').addEventListener('click', (e) => {
   const btn = e.target.closest('.rack-btn');
   if(!btn) return;
   document.querySelectorAll('#typeOptions .rack-btn').forEach(b=>b.classList.remove('selected'));
   btn.classList.add('selected');
-  selectedLocType = btn.dataset.type || 'BINS';
+  selectedLocType = btn.dataset.type || 'PICK';
+  updateTypeNote();
 });
 
 function parseLocation(raw){
