@@ -247,9 +247,10 @@ let selectedLocType = 'BINS';
 // Warehouses disponibles. El label es lo que se escribe en la columna Warehouse
 // del CSV generado y lo que se busca en la columna Warehouse de locations.csv.
 // seqFrom: de que warehouse se toma el PickSequence si no hay dato propio.
+// Cadena de herencia: Majors -> Ecommerce -> General / Wholesale.
 const WAREHOUSES = [
   {key:'ws',     label:'General / Wholesale'},
-  {key:'ecomm',  label:'Ecommerce'},
+  {key:'ecomm',  label:'Ecommerce', seqFrom:'ws'},
   {key:'majors', label:'Majors', seqFrom:'ecomm'}
 ];
 const SEQ_FROM = {};
