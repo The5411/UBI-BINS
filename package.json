@@ -4,7 +4,8 @@
   "private": true,
   "description": "Conversor de ubicaciones a bins servido como una app web en Railway",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node selftest.js"
   },
   "engines": {
     "node": ">=18"

@@ -522,10 +522,10 @@ document.getElementById('genBtn').addEventListener('click', async () => {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 
-  // Encadenar el PDF de etiquetas: una etiqueta por ubicacion, no una por warehouse.
-  if (typeof window.generateLabelsFromCsv === 'function'){
-    statusEl.textContent += ' · generando PDF de etiquetas…';
-    window.generateLabelsFromCsv(csv, fileName);
+  // Dejamos las etiquetas cargadas abajo (una por ubicacion, sin repetir por warehouse),
+  // pero la unica descarga de este boton es el CSV.
+  if (typeof window.loadLabelsFromCsv === 'function'){
+    window.loadLabelsFromCsv(csv, fileName);
   }
 });
 </script>
@@ -815,18 +815,19 @@ document.getElementById('genBtn').addEventListener('click', async () => {
     showStatus(`Se usó el CSV generado recientemente: ${window.lastGeneratedCsv.fileName || 'csv-generado.csv'}`, 'ok');
   });
 
-  // Puente para el conversor: carga el CSV recien generado y dispara el PDF solo.
-  window.generateLabelsFromCsv = function(csvText, fileName){
+  // Puente para el conversor: deja las etiquetas listas para generar.
+  // No dispara el PDF solo: una sola descarga por click evita que el navegador
+  // bloquee la segunda (el PDF se baja despues con "Generar PDF").
+  window.loadLabelsFromCsv = function(csvText, fileName){
     if (!csvText) return;
     const file = new File([csvText], fileName || 'csv-generado.csv', {
       type: 'text/csv;charset=utf-8;'
     });
     handleFile(file, () => {
-      if (!genBtn.disabled){
-        genBtn.click();
-      } else {
-        showStatus('El PDF anterior todavia se esta generando. Cuando termine, apreta "Generar PDF".', 'warn');
-      }
+      showStatus(
+        'Etiquetas listas: ' + totalLabels + ' (una por ubicacion). Apreta "Generar PDF" para descargar el PDF.',
+        'ok'
+      );
     });
   };
 
