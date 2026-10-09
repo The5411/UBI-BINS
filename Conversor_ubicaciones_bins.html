@@ -1201,6 +1201,19 @@ document.getElementById('genBtn').addEventListener('click', async () => {
   genBtn.addEventListener('click', async function(){
     if (mode === 'producto' && !rows.length) return;
     if (mode === 'simple' && !simpleCodes.length) return;
+    try {
+      await buildPdf();
+    } catch (err) {
+      console.error(err);
+      showStatus('No se pudo generar el PDF: ' + (err && err.message ? err.message : err), 'warn');
+    } finally {
+      // pase lo que pase el boton vuelve a quedar usable
+      progress.classList.remove('show');
+      genBtn.disabled = false;
+    }
+  });
+
+  async function buildPdf(){
     genBtn.disabled = true;
     progress.classList.add('show');
     progressText.textContent = 'Generando 0 / ' + totalLabels;
@@ -1282,11 +1295,14 @@ document.getElementById('genBtn').addEventListener('click', async () => {
 
     const hint = document.createElement('div');
     hint.className = 'pdf-hint';
-    hint.textContent = 'Si la descarga no se disparó sola, hacé click en el enlace de arriba.';
+    hint.textContent = 'Si no se descargó solo, hacé click en el enlace de arriba. Los navegadores suelen bloquear la segunda descarga automática de una misma página: permiti "descargar varios archivos" en el candado de la barra de direcciones.';
     linkWrap.appendChild(hint);
+
+    showStatus('PDF listo: ' + count + ' etiquetas. Si la descarga no arrancó sola, usá el enlace de abajo.', 'ok');
+    linkWrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     progress.classList.remove('show');
     genBtn.disabled = false;
-  });
+  }
 })();
 </script>
