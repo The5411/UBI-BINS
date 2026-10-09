@@ -521,6 +521,12 @@ document.getElementById('genBtn').addEventListener('click', async () => {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+
+  // Encadenar el PDF de etiquetas: una etiqueta por ubicacion, no una por warehouse.
+  if (typeof window.generateLabelsFromCsv === 'function'){
+    statusEl.textContent += ' · generando PDF de etiquetas…';
+    window.generateLabelsFromCsv(csv, fileName);
+  }
 });
 </script>
 </body>
@@ -809,6 +815,21 @@ document.getElementById('genBtn').addEventListener('click', async () => {
     showStatus(`Se usó el CSV generado recientemente: ${window.lastGeneratedCsv.fileName || 'csv-generado.csv'}`, 'ok');
   });
 
+  // Puente para el conversor: carga el CSV recien generado y dispara el PDF solo.
+  window.generateLabelsFromCsv = function(csvText, fileName){
+    if (!csvText) return;
+    const file = new File([csvText], fileName || 'csv-generado.csv', {
+      type: 'text/csv;charset=utf-8;'
+    });
+    handleFile(file, () => {
+      if (!genBtn.disabled){
+        genBtn.click();
+      } else {
+        showStatus('El PDF anterior todavia se esta generando. Cuando termine, apreta "Generar PDF".', 'warn');
+      }
+    });
+  };
+
   function normalizeHeader(h){
     return String(h || '').trim().toLowerCase().replace(/\s+/g,' ');
   }
@@ -863,7 +884,7 @@ document.getElementById('genBtn').addEventListener('click', async () => {
 
   const PRODUCT_FIELDS = ['title','style','description','color','size','barcode','rrp'];
 
-  function handleFile(file){
+  function handleFile(file, onReady){
     const reader = new FileReader();
     reader.onload = function(e){
       try{
@@ -911,6 +932,7 @@ document.getElementById('genBtn').addEventListener('click', async () => {
 
           showStatus(`Archivo leído correctamente: ${raw.length} filas, ${totalLabels} etiquetas a generar.`, 'ok');
           panel.classList.add('show');
+          if (typeof onReady === 'function') onReady();
         } else {
           // No product columns found: treat as a simple code list (column H = index 7)
           mode = 'simple';
@@ -918,9 +940,18 @@ document.getElementById('genBtn').addEventListener('click', async () => {
 
           const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
           const dataRows = aoa.slice(1); // skip header row
-          simpleCodes = dataRows
+          const allCodes = dataRows
             .map(r => String(r[7] ?? '').trim())
             .filter(v => v !== '');
+
+          // Una etiqueta por ubicacion: el CSV repite cada bin una vez por warehouse.
+          const seenCodes = new Set();
+          simpleCodes = allCodes.filter(c => {
+            if (seenCodes.has(c)) return false;
+            seenCodes.add(c);
+            return true;
+          });
+          const dupeCount = allCodes.length - simpleCodes.length;
 
           if (!simpleCodes.length){
             showStatus('No se encontraron códigos en la columna H de este archivo.', 'warn');
@@ -929,17 +960,24 @@ document.getElementById('genBtn').addEventListener('click', async () => {
 
           totalLabels = simpleCodes.length;
 
-          document.getElementById('pdfStatRows').textContent = simpleCodes.length;
+          document.getElementById('pdfStatRows').textContent = allCodes.length;
           document.getElementById('pdfStatLabels').textContent = totalLabels;
           document.getElementById('pdfStatPages').textContent = totalLabels;
 
           const colsInfo = document.getElementById('pdfColsInfo');
-          colsInfo.innerHTML = '<b>Modo detectado:</b> etiqueta simple (código de la columna H + código de barras).';
+          colsInfo.innerHTML = '<b>Modo detectado:</b> etiqueta simple (código de la columna H + código de barras).' +
+            (dupeCount > 0 ? '<br><b>Una etiqueta por ubicación:</b> se omitieron ' + dupeCount + ' filas repetidas (la misma ubicación en los otros warehouses).' : '');
 
           renderSimplePreviewTable(simpleCodes);
 
-          showStatus(`Archivo leído correctamente: ${simpleCodes.length} códigos, ${totalLabels} etiquetas a generar.`, 'ok');
+          showStatus(
+            dupeCount > 0
+              ? `Archivo leído correctamente: ${allCodes.length} filas, ${totalLabels} etiquetas (1 por ubicación, ${dupeCount} repetidas omitidas).`
+              : `Archivo leído correctamente: ${allCodes.length} códigos, ${totalLabels} etiquetas a generar.`,
+            'ok'
+          );
           panel.classList.add('show');
+          if (typeof onReady === 'function') onReady();
         }
       } catch(err){
         console.error(err);
